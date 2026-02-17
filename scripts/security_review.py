@@ -62,13 +62,30 @@ class SecurityReviewer:
         # Check if Requirements section exists
         has_requirements = bool(re.search(r"##\s+Requirements?", skill_content, re.IGNORECASE))
         
-        if found_deps and not has_requirements:
-            self.issues.append({
-                "type": "missing_requirements",
-                "severity": "medium",
-                "message": f"Skill uses system dependencies ({', '.join(sorted(found_deps))}) but no Requirements section found in SKILL.md",
-                "fix": "Add a ## Requirements section listing all CLI tools and system dependencies"
-            })
+        # Check if dependencies are mentioned in Requirements section
+        deps_mentioned = False
+        if has_requirements and found_deps:
+            # Extract Requirements section content
+            req_match = re.search(r"##\s+Requirements?.*?##", skill_content, re.IGNORECASE | re.DOTALL)
+            if req_match:
+                req_content = req_match.group(0).lower()
+                deps_mentioned = all(dep.lower() in req_content for dep in found_deps)
+        
+        if found_deps:
+            if not has_requirements:
+                self.issues.append({
+                    "type": "missing_requirements",
+                    "severity": "medium",
+                    "message": f"Skill uses system dependencies ({', '.join(sorted(found_deps))}) but no Requirements section found in SKILL.md",
+                    "fix": "Add a ## Requirements section listing all CLI tools and system dependencies"
+                })
+            elif not deps_mentioned:
+                self.warnings.append({
+                    "type": "requirements_incomplete",
+                    "severity": "low",
+                    "message": f"Skill uses system dependencies ({', '.join(sorted(found_deps))}) but they're not all mentioned in Requirements section",
+                    "fix": "Update Requirements section to list all CLI tools and system dependencies used by the skill"
+                })
 
     def check_secret_logging(self):
         """Check for secrets being logged to files."""
@@ -124,6 +141,9 @@ class SecurityReviewer:
                             # Check if cmd variable is passed and contains secrets
                             cmd_context = "\n".join(lines[max(0, i-20):min(len(lines), i+5)])
                             if re.search(r"cmd.*=.*\[.*--(token|password|auth)", cmd_context, re.IGNORECASE):
+                                # Only flag if stdout/stderr are actually sent to the log (not DEVNULL)
+                                if "devnull" in context.lower() and "stdout" in context.lower() and "stderr" in context.lower():
+                                    continue  # Safe: output discarded
                                 if "stdout" in line.lower() or "stderr" in line.lower() or log_path in line:
                                     self.issues.append({
                                         "type": "secret_logging",
