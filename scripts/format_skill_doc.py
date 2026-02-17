@@ -170,10 +170,11 @@ def emit_markdown(frontmatter: dict, canonical: dict, other: list, generate_exam
 
 def main():
     ap = argparse.ArgumentParser(description="Format SKILL.md for ClawHub display")
-    ap.add_argument("input", type=Path, help="Path to SKILL.md")
+    ap.add_argument("input", type=Path, help="Path to SKILL.md or skill directory")
     ap.add_argument("-o", "--output", type=Path, default=None, help="Output file (default: stdout)")
     ap.add_argument("--generate-examples", action="store_true", help="Generate example block from description if missing")
     ap.add_argument("--inplace", action="store_true", help="Overwrite input file (use with care)")
+    ap.add_argument("--security-check", action="store_true", help="Run security review checks after formatting")
     args = ap.parse_args()
 
     path = args.input
@@ -197,6 +198,20 @@ def main():
         print(f"Wrote {args.output}", file=sys.stderr)
     else:
         print(result, end="")
+    
+    # Run security check if requested
+    if args.security_check:
+        skill_dir = path.parent if path.name == "SKILL.md" else path
+        security_script = Path(__file__).parent / "security_review.py"
+        if security_script.exists():
+            import subprocess
+            print("\n" + "=" * 70, file=sys.stderr)
+            print("Running security review...", file=sys.stderr)
+            print("=" * 70 + "\n", file=sys.stderr)
+            try:
+                subprocess.run([sys.executable, str(security_script), str(skill_dir)], check=False)
+            except Exception as e:
+                print(f"Warning: Security check failed: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

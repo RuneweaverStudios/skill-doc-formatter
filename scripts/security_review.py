@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+"""
+Security review checker for OpenClaw skills.
+Scans skills for common security issues that affect ClawHub security reviews.
+"""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+
+class SecurityReviewer:
+    def __init__(self, skill_dir: Path):
+        self.skill_dir = Path(skill_dir)
+        self.issues = []
+        self.warnings = []
+        self.suggestions = []
+
+    def check_requirements_declaration(self):
+        """Check if runtime dependencies are declared in SKILL.md or _meta.json."""
+        skill_md = self.skill_dir / "SKILL.md"
+        meta_json = self.skill_dir / "_meta.json"
+        
+        # Read SKILL.md
+        skill_content = ""
+        if skill_md.exists():
+            skill_content = skill_md.read_text(encoding="utf-8")
+        
+        # Read _meta.json
+        meta = {}
+        if meta_json.exists():
+            try:
+                meta = json.loads(meta_json.read_text(encoding="utf-8"))
+            except:
+                pass
+        
+        # Check for common CLI/system dependencies in scripts
+        scripts_dir = self.skill_dir / "scripts"
+        found_deps = set()
+        
+        if scripts_dir.exists():
+            for script_file in scripts_dir.glob("*.py"):
+                content = script_file.read_text(encoding="utf-8")
+                # Check for subprocess calls to system tools
+                if re.search(r"subprocess\.(run|call|Popen|check_output)", content):
+                    # Look for common system tools in command arrays or strings
+                    for tool in ["openclaw", "lsof", "ps", "launchctl", "curl", "wget", "git", "which", "kill", "killall"]:
+                        # Check for tool in command arrays or subprocess calls
+                        if re.search(rf"['\"]({tool})['\"]|\[.*['\"]({tool})['\"]", content, re.IGNORECASE):
+                            found_deps.add(tool)
+            
+            # Also check shell scripts
+            for script_file in scripts_dir.glob("*.sh"):
+                content = script_file.read_text(encoding="utf-8")
+                for tool in ["openclaw", "lsof", "ps", "launchctl", "curl", "wget", "git", "which", "kill", "killall"]:
+                    if re.search(rf"\\b{tool}\\b", content, re.IGNORECASE):
+                        found_deps.add(tool)
+        
+        # Check if Requirements section exists
+        has_requirements = bool(re.search(r"##\s+Requirements?", skill_content, re.IGNORECASE))
+        
+        if found_deps and not has_requirements:
+            self.issues.append({
+                "type": "missing_requirements",
+                "severity": "medium",
+                "message": f"Skill uses system dependencies ({', '.join(sorted(found_deps))}) but no Requirements section found in SKILL.md",
+                "fix": "Add a ## Requirements section listing all CLI tools and system dependencies"
+            })
+
+    def check_secret_logging(self):
+        """Check for secrets being logged to files."""
+        scripts_dir = self.skill_dir / "scripts"
+        if not scripts_dir.exists():
+            return
+        
+        for script_file in scripts_dir.glob("*.py"):
+            content = script_file.read_text(encoding="utf-8")
+            lines = content.split("\n")
+            
+            # Look for log file paths
+            log_paths = []
+            for i, line in enumerate(lines, 1):
+                # Find log file paths
+                match = re.search(r"['\"]([^'\"]+\.log)['\"]", line)
+                if match:
+                    log_paths.append((i, match.group(1)))
+            
+            # Check each log file usage
+            for log_line_num, log_path in log_paths:
+                # Look for writes to this log file
+                for i, line in enumerate(lines, 1):
+                    if log_path in line and ("write" in line.lower() or "logf" in line or "log_file" in line.lower() or "open" in line.lower()):
+                        # Check if command with secrets is being written
+                        # Look ahead and behind a few lines for command construction
+                        context_start = max(0, i - 15)
+                        context_end = min(len(lines), i + 10)
+                        context = "\n".join(lines[context_start:context_end])
+                        
+                        # Pattern 1: Writing joined command array (e.g., ' '.join(cmd))
+                        if re.search(r"['\"].*join\(.*cmd|' '.join\(.*cmd|\+.*cmd", context, re.IGNORECASE):
+                            # Check if cmd contains secrets
+                            if re.search(r"cmd.*--(token|password|auth)|--(token|password|auth).*cmd", context, re.IGNORECASE):
+                                self.issues.append({
+                                    "type": "secret_logging",
+                                    "severity": "high",
+                                    "message": f"{script_file.name}:{i} - Full command with secrets written to log file '{log_path}'",
+                                    "fix": "Do not log full command strings containing secrets. Log only command name and masked arguments (e.g., log cmd[0] + '***' for args)"
+                                })
+                        
+                        # Pattern 2: Direct write of command string with secrets
+                        if re.search(r"write.*\(.*['\"].*--(token|password|auth)", line, re.IGNORECASE):
+                            self.issues.append({
+                                "type": "secret_logging",
+                                "severity": "high",
+                                "message": f"{script_file.name}:{i} - Command with secrets written to log file '{log_path}'",
+                                "fix": "Do not log full command strings containing secrets. Log only command name and masked arguments"
+                            })
+                        
+                        # Pattern 3: subprocess.Popen with stdout/stderr to log file and cmd contains secrets
+                        if "subprocess" in context.lower() and ("Popen" in context or "run" in context):
+                            # Check if cmd variable is passed and contains secrets
+                            cmd_context = "\n".join(lines[max(0, i-20):min(len(lines), i+5)])
+                            if re.search(r"cmd.*=.*\[.*--(token|password|auth)", cmd_context, re.IGNORECASE):
+                                if "stdout" in line.lower() or "stderr" in line.lower() or log_path in line:
+                                    self.issues.append({
+                                        "type": "secret_logging",
+                                        "severity": "high",
+                                        "message": f"{script_file.name}:{i} - Command with secrets passed to subprocess with output to log file '{log_path}'",
+                                        "fix": "Do not pass commands with secrets to subprocess when stdout/stderr goes to log files. Mask secrets in command or redirect output elsewhere"
+                                    })
+                        
+                        # Pattern 4: Direct secret/token/password variable in write statement
+                        if re.search(r"write.*\(.*(secret|token|password)", line, re.IGNORECASE):
+                            self.issues.append({
+                                "type": "secret_logging",
+                                "severity": "high",
+                                "message": f"{script_file.name}:{i} - Potential secret value written to log file '{log_path}'",
+                                "fix": "Mask secrets before logging (e.g., log only hash or '***') or avoid logging command arguments containing secrets"
+                            })
+
+    def check_missing_files(self):
+        """Check for referenced files that don't exist in the skill."""
+        scripts_dir = self.skill_dir / "scripts"
+        if not scripts_dir.exists():
+            return
+        
+        for script_file in scripts_dir.glob("*.sh"):
+            content = script_file.read_text(encoding="utf-8")
+            
+            # Look for file references
+            for match in re.finditer(r"([\"'])([^\"']+\.(plist|json|py|sh))\\1", content):
+                ref_file = match.group(2)
+                # Check if it's a relative path
+                if not ref_file.startswith("/") and not ref_file.startswith("$"):
+                    full_path = self.skill_dir / ref_file
+                    if not full_path.exists():
+                        # Check if it's in scripts/
+                        script_path = scripts_dir / ref_file
+                        if not script_path.exists():
+                            self.issues.append({
+                                "type": "missing_file",
+                                "severity": "medium",
+                                "message": f"{script_file.name} references '{ref_file}' which doesn't exist",
+                                "fix": f"Add the missing file or update the reference"
+                            })
+
+    def check_env_vars_declaration(self):
+        """Check if environment variables are declared."""
+        scripts_dir = self.skill_dir / "scripts"
+        skill_md = self.skill_dir / "SKILL.md"
+        
+        if not scripts_dir.exists():
+            return
+        
+        # Find env vars used in scripts
+        found_env_vars = set()
+        for script_file in scripts_dir.glob("*.py"):
+            content = script_file.read_text(encoding="utf-8")
+            for match in re.finditer(r"os\.environ\.get\(['\"]([^'\"]+)['\"]", content):
+                found_env_vars.add(match.group(1))
+            for match in re.finditer(r"os\.getenv\(['\"]([^'\"]+)['\"]", content):
+                found_env_vars.add(match.group(1))
+        
+        if found_env_vars:
+            skill_content = ""
+            if skill_md.exists():
+                skill_content = skill_md.read_text(encoding="utf-8")
+            
+            # Check if env vars are mentioned
+            env_vars_mentioned = any(
+                re.search(rf"\\b{var}\\b", skill_content, re.IGNORECASE)
+                for var in found_env_vars
+            )
+            
+            if not env_vars_mentioned:
+                self.warnings.append({
+                    "type": "env_vars_not_declared",
+                    "severity": "low",
+                    "message": f"Scripts use environment variables ({', '.join(sorted(found_env_vars))}) but they're not documented",
+                    "fix": "Document required environment variables in SKILL.md Requirements section"
+                })
+
+    def check_persistent_behavior(self):
+        """Check for LaunchAgent/daemon behavior without always:true."""
+        scripts_dir = self.skill_dir / "scripts"
+        meta_json = self.skill_dir / "_meta.json"
+        
+        if not scripts_dir.exists():
+            return
+        
+        # Check for LaunchAgent install scripts
+        has_launchagent = False
+        for script_file in scripts_dir.glob("*.sh"):
+            content = script_file.read_text(encoding="utf-8")
+            if "launchctl" in content.lower() or "plist" in content.lower():
+                has_launchagent = True
+                break
+        
+        if has_launchagent:
+            meta = {}
+            if meta_json.exists():
+                try:
+                    meta = json.loads(meta_json.read_text(encoding="utf-8"))
+                except:
+                    pass
+            
+            if not meta.get("always"):
+                self.warnings.append({
+                    "type": "persistent_behavior",
+                    "severity": "low",
+                    "message": "Skill installs LaunchAgent/daemon but _meta.json doesn't have 'always': true",
+                    "fix": "Add 'always': true to _meta.json if the skill runs persistently"
+                })
+
+    def check_file_permissions(self):
+        """Check for log files that might need restricted permissions."""
+        scripts_dir = self.skill_dir / "scripts"
+        if not scripts_dir.exists():
+            return
+        
+        for script_file in scripts_dir.glob("*.py"):
+            content = script_file.read_text(encoding="utf-8")
+            
+            # Look for log file creation
+            for match in re.finditer(r"open\(['\"]([^'\"]+\.log)['\"]", content):
+                log_file = match.group(1)
+                # Check if permissions are set
+                context_lines = content[:content.find(match.group(0))].split("\n")
+                has_permissions = any("chmod" in line or "os.chmod" in line for line in context_lines[-10:])
+                
+                if not has_permissions and "secret" in log_file.lower() or "auth" in log_file.lower():
+                    self.suggestions.append({
+                        "type": "log_file_permissions",
+                        "severity": "low",
+                        "message": f"{script_file.name} creates log file '{log_file}' - consider restricting permissions",
+                        "fix": "Set restrictive permissions on log files containing sensitive data: os.chmod(log_path, 0o600)"
+                    })
+
+    def run_all_checks(self):
+        """Run all security checks."""
+        self.check_requirements_declaration()
+        self.check_secret_logging()
+        self.check_missing_files()
+        self.check_env_vars_declaration()
+        self.check_persistent_behavior()
+        self.check_file_permissions()
+
+    def generate_report(self, json_output: bool = False) -> str:
+        """Generate a security review report."""
+        self.run_all_checks()
+        
+        if json_output:
+            return json.dumps({
+                "issues": self.issues,
+                "warnings": self.warnings,
+                "suggestions": self.suggestions,
+                "summary": {
+                    "total_issues": len(self.issues),
+                    "total_warnings": len(self.warnings),
+                    "total_suggestions": len(self.suggestions),
+                    "high_severity": len([i for i in self.issues if i["severity"] == "high"]),
+                    "medium_severity": len([i for i in self.issues if i["severity"] == "medium"]),
+                }
+            }, indent=2)
+        
+        # Text report
+        lines = []
+        lines.append("=" * 70)
+        lines.append("SECURITY REVIEW REPORT")
+        lines.append("=" * 70)
+        lines.append("")
+        
+        if not self.issues and not self.warnings and not self.suggestions:
+            lines.append("✓ No security issues found!")
+            lines.append("")
+            return "\n".join(lines)
+        
+        if self.issues:
+            lines.append(f"ISSUES ({len(self.issues)}):")
+            lines.append("-" * 70)
+            for issue in self.issues:
+                lines.append(f"[{issue['severity'].upper()}] {issue['type']}")
+                lines.append(f"  {issue['message']}")
+                lines.append(f"  Fix: {issue['fix']}")
+                lines.append("")
+        
+        if self.warnings:
+            lines.append(f"WARNINGS ({len(self.warnings)}):")
+            lines.append("-" * 70)
+            for warning in self.warnings:
+                lines.append(f"[{warning['severity'].upper()}] {warning['type']}")
+                lines.append(f"  {warning['message']}")
+                lines.append(f"  Fix: {warning['fix']}")
+                lines.append("")
+        
+        if self.suggestions:
+            lines.append(f"SUGGESTIONS ({len(self.suggestions)}):")
+            lines.append("-" * 70)
+            for suggestion in self.suggestions:
+                lines.append(f"[{suggestion['severity'].upper()}] {suggestion['type']}")
+                lines.append(f"  {suggestion['message']}")
+                lines.append(f"  Fix: {suggestion['fix']}")
+                lines.append("")
+        
+        lines.append("=" * 70)
+        return "\n".join(lines)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Security review checker for OpenClaw skills")
+    ap.add_argument("skill_dir", type=Path, help="Path to skill directory")
+    ap.add_argument("--json", action="store_true", help="Output JSON format")
+    args = ap.parse_args()
+    
+    skill_dir = Path(args.skill_dir)
+    if not skill_dir.exists():
+        print(f"Error: skill directory not found: {skill_dir}", file=sys.stderr)
+        sys.exit(1)
+    
+    reviewer = SecurityReviewer(skill_dir)
+    report = reviewer.generate_report(json_output=args.json)
+    print(report)
+    
+    # Exit with error code if there are high-severity issues
+    if reviewer.issues:
+        high_severity = [i for i in reviewer.issues if i["severity"] == "high"]
+        if high_severity:
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
