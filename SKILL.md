@@ -9,13 +9,7 @@ version: 1.0.0
 
 ## Description
 
-Formats SKILL.md (OpenClaw/Cursor skill docs) for optimal display on ClawHub. Produces a consistent structure—Description, Installation, Usage with benefit-focused examples, and Commands—so skill pages are clear and scannable.
-
-# Skill Doc Formatter | ClawHub
-
-Formats **SKILL.md** skill documentation for optimal display on ClawHub. Output uses a consistent structure so skill pages are easy to scan: **Description**, **Installation**, **Usage** (with examples that showcase benefits), and **Commands**.
-
-Clear description: what the skill does and when to use it. Scannable.
+Formats **SKILL.md** skill documentation for optimal display on ClawHub. Produces a consistent structure -- **Description**, **Installation**, **Usage** (with examples that showcase benefits), and **Commands** -- so skill pages are clear and scannable.
 
 
 ## Installation
