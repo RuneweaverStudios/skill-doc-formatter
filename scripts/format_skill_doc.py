@@ -35,17 +35,26 @@ def extract_sections(body: str):
     """Split body by ## headers. Returns list of (title, content)."""
     sections = []
     pattern = re.compile(r"^##\s+(.+)$", re.MULTILINE)
-    last_end = 0
-    for m in pattern.finditer(body):
-        if last_end < m.start():
-            sections.append(("_intro", body[last_end:m.start()].strip()))
+    matches = list(pattern.finditer(body))
+
+    if not matches:
+        # No headers at all: treat entire body as intro
+        if body.strip():
+            sections.append(("_intro", body.strip()))
+        return sections
+
+    # Content before the first header is the intro
+    if matches[0].start() > 0:
+        intro = body[:matches[0].start()].strip()
+        if intro:
+            sections.append(("_intro", intro))
+
+    # Each header's content runs until the next header (or end of body)
+    for i, m in enumerate(matches):
         start = m.end()
-        next_m = pattern.search(body, start)
-        end = next_m.start() if next_m else len(body)
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
         sections.append((m.group(1).strip(), body[start:end].strip()))
-        last_end = end
-    if last_end < len(body) and not sections:
-        sections.append(("_intro", body.strip()))
+
     return sections
 
 

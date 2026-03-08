@@ -34,13 +34,15 @@ clawhub install your-skill
 
 ## Examples
 
-**Example 1: [benefit]**  
-*Scenario:* User wants to do X.  
-*Action:* Run `your-command --foo`.  
-*Outcome:* Brief result that showcases the benefit.
+**Example 1: Standardize a skill before publishing**
+*Scenario:* You have a new skill with an unstructured SKILL.md and want it ready for ClawHub.
+*Action:* Run `python3 scripts/format_skill_doc.py /path/to/my-skill/SKILL.md --inplace --generate-examples`.
+*Outcome:* SKILL.md is rewritten with Description, Installation, Usage, Examples, and Commands sections in canonical order. Missing examples are auto-generated from the description.
 
-**Example 2: [benefit]**  
-(Same pattern.)
+**Example 2: Catch security issues before ClawHub review**
+*Scenario:* Your skill was flagged "Suspicious" on ClawHub and you want to find out why.
+*Action:* Run `python3 scripts/security_review.py /path/to/my-skill`.
+*Outcome:* A report lists undeclared dependencies, secrets in log files, and missing environment variable docs so you can fix them before resubmitting.
 
 
 ## Commands

@@ -34,9 +34,9 @@ class SecurityReviewer:
         if meta_json.exists():
             try:
                 meta = json.loads(meta_json.read_text(encoding="utf-8"))
-            except:
+            except (json.JSONDecodeError, OSError):
                 pass
-        
+
         # Check for common CLI/system dependencies in scripts
         scripts_dir = self.skill_dir / "scripts"
         found_deps = set()
@@ -244,9 +244,9 @@ class SecurityReviewer:
             if meta_json.exists():
                 try:
                     meta = json.loads(meta_json.read_text(encoding="utf-8"))
-                except:
+                except (json.JSONDecodeError, OSError):
                     pass
-            
+
             if not meta.get("always"):
                 self.warnings.append({
                     "type": "persistent_behavior",
