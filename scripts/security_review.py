@@ -56,7 +56,7 @@ class SecurityReviewer:
             for script_file in scripts_dir.glob("*.sh"):
                 content = script_file.read_text(encoding="utf-8")
                 for tool in ["openclaw", "lsof", "ps", "launchctl", "curl", "wget", "git", "which", "kill", "killall"]:
-                    if re.search(rf"\\b{tool}\\b", content, re.IGNORECASE):
+                    if re.search(rf"\b{tool}\b", content, re.IGNORECASE):
                         found_deps.add(tool)
         
         # Check if Requirements section exists
@@ -211,7 +211,7 @@ class SecurityReviewer:
             
             # Check if env vars are mentioned
             env_vars_mentioned = any(
-                re.search(rf"\\b{var}\\b", skill_content, re.IGNORECASE)
+                re.search(rf"\b{var}\b", skill_content, re.IGNORECASE)
                 for var in found_env_vars
             )
             
