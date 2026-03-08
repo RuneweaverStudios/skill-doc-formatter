@@ -1,5 +1,11 @@
 {
-  "displayName": "Skill Doc Formatter | ClawHub",
+  "schema": "openclaw.skill.v1",
+  "slug": "skill-doc-formatter",
+  "name": "skill-doc-formatter",
   "version": "1.0.0",
-  "slug": "skill-doc-formatter"
+  "displayName": "Skill Doc Formatter | ClawHub",
+  "description": "Formats SKILL.md (OpenClaw/Cursor skill docs) for optimal display on ClawHub. Produces a consistent structure\u2014Description, Installation, Usage with benefit-focused examples, and Commands\u2014so skill pages are clear and scannable.",
+  "author": "RuneweaverStudios",
+  "tags": [],
+  "platform": "openclaw"
 }
