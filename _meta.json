@@ -17,5 +17,10 @@
     "clawhub"
   ],
   "platform": "openclaw",
-  "main": "scripts/format_skill_doc.py"
+  "main": "scripts/format_skill_doc.py",
+  "requires": {
+    "anyBins": [
+      "python3"
+    ]
+  }
 }

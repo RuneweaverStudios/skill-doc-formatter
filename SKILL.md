@@ -54,7 +54,7 @@ python3 <skill-dir>/scripts/script.py other              # What it does
 
 - **command** — Short description.
 - **other** — Short description.
-```
+
 
 
 ## Target structure (ClawHub-optimized)

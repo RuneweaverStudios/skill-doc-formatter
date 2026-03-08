@@ -1,0 +1,10 @@
+{
+  "default_style": "clawhub",
+  "generate_examples": false,
+  "inplace": false,
+  "security_check": false,
+  "output": {
+    "format": "markdown",
+    "include_toc": false
+  }
+}
